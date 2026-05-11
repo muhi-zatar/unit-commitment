@@ -58,3 +58,24 @@ HiGHS default vs SCIP default.
 **Result.** *(fill in: median ratios by k; whether both solvers see the
 symmetry effect; any solver-specific surprises. If pyscipopt was not
 installed at run time, document the HiGHS-only fallback here.)*
+
+---
+
+## 5. (Bonus) Does the v3 story hold on real PGLib-UC instances?
+
+**Setup.** PGLib-UC small + medium instances from `ca/`, `ferc/`, `rts_gmlc/`
+(thermals only, horizon truncated to 24 h). HiGHS + SCIP defaults, 600 s.
+
+![highs time vs size](plots/phase5_highs_time_vs_size.png)
+![pglib time scatter](plots/phase5_time_scatter.png)
+![pglib nodes scatter](plots/phase5_nodes_scatter.png)
+
+**Caveats.** Our adapter lossily linearizes piecewise costs, picks the hot-
+start cost from PGLib's lag-dependent startup table, ignores `must_run`, and
+does not net out renewables by default. Objective values therefore do not
+match PGLib reference values. The branching behaviour and presolve effects
+*are* a fair comparison, which is the point of v3.
+
+**Result.** *(fill in: do real instances solve at root like v1 synthetic UC?
+Where does HiGHS vs SCIP land on real cases? Is the picture different from
+the symmetric-synthetic story?)*
