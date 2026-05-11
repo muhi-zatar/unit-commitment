@@ -1,4 +1,4 @@
 __pycache*
-*.png
-*.csv
-*.json
+uc_experiment_v3/plots/*.png
+uc_experiment_v3/*.csv
+uc_experiment_v3/*.json
