@@ -1,1 +1,4 @@
 __pycache*
+*.png
+*.csv
+*.json
