@@ -21,6 +21,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT = os.path.dirname(THIS_DIR)
+V3_PHASE5_CSV = os.path.join(PARENT, 'uc_experiment_v3', 'phase5_results.csv')
 PLOTS_DIR = os.path.join(THIS_DIR, 'plots')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
@@ -118,9 +120,11 @@ def main():
 
     df = _numeric(df, ['n_branch', 'n_bus', 'n_gen', 'horizon',
                        'mip_total_time_s', 'mip_node_count', 'mip_gap'])
+    # Keep solver-converged or time-limited rows. SCIP reports 'gaplimit'
+    # when it stopped within the requested gap; treat as success.
     if 'status' in df.columns:
-        df = df[df['status'].astype(str).str.lower().str.startswith(
-            ('optimal', 'time'))]
+        ok_prefixes = ('optimal', 'time', 'gaplimit')
+        df = df[df['status'].astype(str).str.lower().str.startswith(ok_prefixes)]
 
     print(f"\nLoaded {len(df)} rows. solvers={list(df['solver'].unique())}")
     print("\n=== Per-network summary ===")
@@ -151,6 +155,87 @@ def main():
 
     if len(df['solver'].unique()) >= 2:
         plot_solver_compare(df)
+
+    # V3 (PGLib single-bus) vs V5 (Egret SCUC with transmission) delta
+    transmission_delta(df)
+
+
+def transmission_delta(df_v5):
+    """Compare V5 rts_gmlc rows (with transmission) to V3 phase5 rts_gmlc/*
+    rows (same generators, single-bus). Prints a table; saves a bar plot."""
+    if not os.path.exists(V3_PHASE5_CSV):
+        print(f"\n(no V3 phase5 CSV at {V3_PHASE5_CSV} - "
+              f"skipping transmission delta)")
+        return
+    try:
+        df_v3 = pd.read_csv(V3_PHASE5_CSV)
+    except Exception as e:
+        print(f"could not read V3 CSV: {e}")
+        return
+    _numeric(df_v3, ['mip_total_time_s', 'mip_node_count', 'mip_gap', 'n_gen'])
+
+    # V3 phase5 uses dataset='rts_gmlc' for PGLib's rts_gmlc/*.json cases
+    v3_rts = df_v3[df_v3.get('dataset', '') == 'rts_gmlc'].copy()
+    v3_rts = v3_rts[v3_rts['status'].astype(str).str.lower().str.startswith(
+        ('optimal', 'time', 'gaplimit'))]
+    v5_rts = df_v5[df_v5['network'] == 'rts_gmlc'].copy()
+
+    if len(v3_rts) == 0 or len(v5_rts) == 0:
+        print("\n(no comparable rts_gmlc rows in both CSVs)")
+        return
+
+    print("\n=== Transmission delta: V3 PGLib single-bus  vs  V5 Egret SCUC ===")
+    print("(same RTS-GMLC generators on both sides; "
+          "only the network model differs)")
+    rows = []
+    for solver in sorted(set(v3_rts['solver']) | set(v5_rts['solver'])):
+        v3 = v3_rts[v3_rts['solver'] == solver]
+        v5 = v5_rts[v5_rts['solver'] == solver]
+        if len(v3) == 0 or len(v5) == 0:
+            continue
+        row = {
+            'solver': solver,
+            'v3_n_instances': len(v3),
+            'v5_n_instances': len(v5),
+            'v3_med_nodes': v3['mip_node_count'].median(),
+            'v5_med_nodes': v5['mip_node_count'].median(),
+            'nodes_x':      (v5['mip_node_count'].median()
+                             / max(v3['mip_node_count'].median(), 1)),
+            'v3_med_time':  v3['mip_total_time_s'].median(),
+            'v5_med_time':  v5['mip_total_time_s'].median(),
+            'time_x':       (v5['mip_total_time_s'].median()
+                             / max(v3['mip_total_time_s'].median(), 1e-3)),
+        }
+        rows.append(row)
+    if not rows:
+        return
+    print(pd.DataFrame(rows).to_string(index=False,
+                                       float_format=lambda x: f"{x:.2f}"))
+
+    # Bar chart
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    solvers = [r['solver'] for r in rows]
+    x = np.arange(len(solvers))
+    for ax, metric, ylabel in [
+        (axes[0], 'nodes', 'MIP nodes (median)'),
+        (axes[1], 'time',  'MIP wall time s (median)')]:
+        v3_vals = [r[f'v3_med_{metric}'] for r in rows]
+        v5_vals = [r[f'v5_med_{metric}'] for r in rows]
+        ax.bar(x - 0.18, np.maximum(v3_vals, 1e-2), width=0.36,
+               label='V3 single-bus PGLib', color='C0')
+        ax.bar(x + 0.18, np.maximum(v5_vals, 1e-2), width=0.36,
+               label='V5 with transmission', color='C3')
+        ax.set_xticks(x); ax.set_xticklabels(solvers)
+        ax.set_yscale('log')
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3, axis='y', which='both')
+        ax.legend()
+    fig.suptitle('Transmission delta — same RTS-GMLC generators, with vs without DC network',
+                 fontsize=11)
+    fig.tight_layout()
+    out = os.path.join(PLOTS_DIR, 'v5_vs_v3_transmission_delta.png')
+    fig.savefig(out, dpi=140); plt.close(fig)
+    print(f"wrote {out}")
 
 
 if __name__ == '__main__':
